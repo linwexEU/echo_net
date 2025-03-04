@@ -2,7 +2,8 @@ import re
 from fastapi_utils.cbv import cbv 
 from fastapi import APIRouter, HTTPException, status, Request, Response, Depends
 from pydantic import EmailStr
-from src.broker.send import send_message
+from src.broker.kafka.producer import KafkaProducerClient
+from src.broker.rabbitmq.send import send_message
 from src.schemas.password_reset import PasswordResetAddToDb, PasswordResetPayload, PasswordResetResponse
 from src.auth.dependencies import get_current_user
 from src.schemas.ip_defender import IpDefenderAddToDbSchema, IpDefenderFiltersSchema
@@ -129,8 +130,19 @@ class AuthApi:
         ip = request.client.host 
         browser = parsed_ua.browser.family 
         device = parsed_ua.device.family
+        
+        # Send message to kafka
+        message = {
+            "user_email": current_user.email, "support_email": settings.SUPPORT_EMAIL, 
+            "pin_code": pin_code, "ip": ip, "device": device, "browser": browser 
+        }
 
-        await send_message(f"{current_user.email}:{settings.SUPPORT_EMAIL}:{pin_code}:{ip}:{device}:{browser}", "email")
+        with KafkaProducerClient(settings.EMAIL_TOPIC) as producer: 
+            producer.send_message(message) 
+
+        # Send message to rabbitmq
+        # await send_message(f"{current_user.email}:{settings.SUPPORT_EMAIL}:{pin_code}:{ip}:{device}:{browser}", "email")
+        
         ips_reset_tries[ip][0] += 1 
 
         return "", 204 
